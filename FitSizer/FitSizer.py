@@ -67,7 +67,7 @@ def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, hand
 
 def addText(sketch, textString, centerX_mm, centerY_mm, textHeightMM=3.0):
     """
-    Add centered text at the given position (in mm), rotated 90° counter-clockwise.
+    Add text at the given position (in mm), rotated 90° counter-clockwise.
     """
     texts = sketch.sketchTexts
     # Convert to cm
@@ -75,22 +75,14 @@ def addText(sketch, textString, centerX_mm, centerY_mm, textHeightMM=3.0):
     cx = mm(centerX_mm)
     cy = mm(centerY_mm)
 
-    # Create a bounding box around the center point
-    boxSize = mm(15)  # 15mm box should be enough for text
-    corner1 = adsk.core.Point3D.create(cx - boxSize/2, cy - boxSize/2, 0)
-    corner2 = adsk.core.Point3D.create(cx + boxSize/2, cy + boxSize/2, 0)
+    # Create text using simple method
+    position = adsk.core.Point3D.create(cx, cy, 0)
+    textInput = texts.createInput(textString, height_cm, position)
+    textInput.angle = math.pi / 2  # 90° CCW
+    textInput.horizontalAlignment = adsk.core.HorizontalAlignments.CenterHorizontalAlignment
 
-    heightInput = adsk.core.ValueInput.createByReal(height_cm)
-    textInput = texts.createInput3(f"'{textString}'", heightInput)
-    textInput.setAsMultiLine(
-        corner1,
-        corner2,
-        adsk.core.HorizontalAlignments.CenterHorizontalAlignment,
-        adsk.core.VerticalAlignments.MiddleVerticalAlignment,
-        math.pi / 2  # 90° counter-clockwise in radians
-    )
-    texts.add(textInput)
-    print(f"[DEBUG] Text '{textString}' added at center ({centerX_mm}, {centerY_mm})mm, rotated 90° CCW")
+    sketchText = texts.add(textInput)
+    print(f"[DEBUG] Text '{textString}' added at ({centerX_mm}, {centerY_mm})mm, angle={textInput.angle}")
 
 def run(context):
     ui = None
@@ -136,20 +128,12 @@ def run(context):
         numWrenchProfiles = sketch.profiles.count
         print(f"[DEBUG] Found {numWrenchProfiles} wrench profiles before adding text")
 
-        # Now add text (creates additional profiles we don't want to extrude)
-        originX = 0.0
-        for size in sizes:
-            handleCenterX = originX + size / 2.0
-            handleCenterY = jawDepth + handleHeight / 2.0
-            try:
-                addText(sketch, f"{size:.1f}", handleCenterX, handleCenterY, textHeightMM=3.0)
-            except Exception as e:
-                print(f"[ERROR] Text add failed for size {size:.2f} mm: {e}")
-            originX += spacing + size + 2 * jawThickness
-
-        # Extrude only wrench profiles (not text)
+        # Extrude wrench profiles first
         print("[INFO] Extruding wrench profiles...")
         extrudes = rootComp.features.extrudeFeatures
+        moveFeatures = rootComp.features.moveFeatures
+        bodies = []  # Track bodies for text cutting
+
         for i in range(numWrenchProfiles):
             profile = sketch.profiles.item(i)
             try:
@@ -161,9 +145,107 @@ def run(context):
                 if ext.bodies.count > 0:
                     body = ext.bodies.item(0)
                     body.name = f"S{sizes[i]:.1f}"
+                    bodies.append(body)
                     print(f"[DEBUG] Extruded and named body: {body.name}")
+
+                    # Rotate body 90° CCW around Z axis at body center
+                    bodyCollection = adsk.core.ObjectCollection.create()
+                    bodyCollection.add(body)
+
+                    # Get body center for rotation pivot
+                    bbox = body.boundingBox
+                    centerX = (bbox.minPoint.x + bbox.maxPoint.x) / 2
+                    centerY = (bbox.minPoint.y + bbox.maxPoint.y) / 2
+                    centerZ = (bbox.minPoint.z + bbox.maxPoint.z) / 2
+
+                    # Create rotation transform (90° CCW = pi/2 radians around Z axis)
+                    zAxis = adsk.core.Vector3D.create(0, 0, 1)
+                    centerPoint = adsk.core.Point3D.create(centerX, centerY, centerZ)
+                    rotateMatrix = adsk.core.Matrix3D.create()
+                    rotateMatrix.setToRotation(math.pi / 2, zAxis, centerPoint)
+
+                    moveInput = moveFeatures.createInput2(bodyCollection)
+                    moveInput.defineAsFreeMove(rotateMatrix)
+                    moveFeatures.add(moveInput)
+                    print(f"[DEBUG] Rotated body {body.name} 90° CCW")
+
             except Exception as e:
-                print(f"[ERROR] Extrude failed for profile {i+1}: {e}")
+                print(f"[ERROR] Extrude/rotate failed for profile {i+1}: {e}")
+
+        # Now add text and emboss into each body
+        print("[INFO] Adding and embossing text...")
+        embossFeatures = rootComp.features.embossFeatures
+        textCutDepth = mm(0.5)  # Cut 0.5mm deep for text
+
+        originX = 0.0
+        for idx, size in enumerate(sizes):
+            if idx >= len(bodies):
+                break
+
+            body = bodies[idx]
+            handleCenterX = originX + size / 2.0
+            handleCenterY = jawDepth + handleHeight / 2.0
+
+            try:
+                # Get the top face of the body (face with highest Z)
+                topFace = None
+                maxZ = -float('inf')
+                for face in body.faces:
+                    bbox = face.boundingBox
+                    if bbox.maxPoint.z > maxZ:
+                        maxZ = bbox.maxPoint.z
+                        topFace = face
+
+                if topFace:
+                    # Create a sketch on the top face
+                    textSketch = rootComp.sketches.add(topFace)
+
+                    # After 90° CCW rotation, the handle is on the left (negative X)
+                    # We want text centered on handle, not geometric center of whole face
+                    # Offset towards handle area (away from mouth)
+                    faceBbox = topFace.boundingBox
+
+                    # Handle is on the min X side after rotation, mouth on max X side
+                    # Center text more towards the handle (offset by half the jaw depth)
+                    handleCenterX = faceBbox.minPoint.x + mm(handleHeight) / 2
+                    handleCenterY = (faceBbox.minPoint.y + faceBbox.maxPoint.y) / 2
+
+                    handleCenterWorld = adsk.core.Point3D.create(
+                        handleCenterX,
+                        handleCenterY,
+                        faceBbox.maxPoint.z
+                    )
+
+                    # Use modelToSketchSpace for proper coordinate conversion
+                    handleCenterSketch = textSketch.modelToSketchSpace(handleCenterWorld)
+
+                    # Add text to this sketch at the handle center
+                    texts = textSketch.sketchTexts
+                    position = adsk.core.Point3D.create(handleCenterSketch.x, handleCenterSketch.y, 0)
+                    textInput = texts.createInput(f"{size:.1f}", mm(3.0), position)
+                    textInput.angle = math.pi / 2  # 90° to align with handle direction
+                    textInput.horizontalAlignment = adsk.core.HorizontalAlignments.CenterHorizontalAlignment
+                    sketchText = texts.add(textInput)
+
+                    print(f"[DEBUG] Size {size}: handle center sketch=({handleCenterSketch.x:.3f}, {handleCenterSketch.y:.3f})")
+
+                    # Create emboss (engrave) using the text
+                    textCollection = adsk.core.ObjectCollection.create()
+                    textCollection.add(sketchText)
+
+                    embossInput = embossFeatures.createInput(
+                        textCollection,
+                        topFace,
+                        adsk.fusion.EmbossFeatureTypes.EngraveEmbossFeatureType
+                    )
+                    embossInput.depth = adsk.core.ValueInput.createByReal(textCutDepth)
+                    embossFeatures.add(embossInput)
+                    print(f"[DEBUG] Embossed text '{size:.1f}' into body {body.name}")
+
+            except Exception as e:
+                print(f"[ERROR] Text emboss failed for size {size:.2f} mm: {e}")
+
+            originX += spacing + size + 2 * jawThickness
 
         print("[INFO] Done.")
     except Exception:

@@ -1,47 +1,153 @@
 import adsk.core, adsk.fusion, traceback, math
 
-# Helper: convert mm to internal units (Fusion 360 API uses centimeters internally)
-def mm(val):
-    return val / 10.0  # Convert mm to cm for Fusion 360 API
 
-def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, handleHeight=12.0):
+def mm(val):
+    """Convert mm to cm (Fusion 360 API internal units)."""
+    return val / 10.0
+
+
+def create_wrench_profile(sketch, origin_x, mouth_width, jaw_depth, jaw_thickness, handle_height):
     """
-    Draws a single closed 2D profile of a wrench shape with U-shaped mouth opening.
-    Returns the handle center position in mm for text placement.
+    Draw a closed wrench profile on the given sketch.
+    Returns the handle center position (x, y) in mm.
     """
     lines = sketch.sketchCurves.sketchLines
 
-    # Convert all dimensions from mm to cm (Fusion internal units)
-    x0 = mm(originX)
-    mw = mm(mouthWidth)
-    jd = mm(jawDepth)
-    jt = mm(jawThickness)
-    hh = mm(handleHeight)
+    # Convert to internal units
+    x0 = mm(origin_x)
+    mw = mm(mouth_width)
+    jd = mm(jaw_depth)
+    jt = mm(jaw_thickness)
+    hh = mm(handle_height)
 
-    # Define points for a single closed profile (clockwise from bottom-left outer)
-    p_bl_outer = adsk.core.Point3D.create(x0 - jt, 0, 0)
-    p_bl_inner = adsk.core.Point3D.create(x0, 0, 0)
-    p_br_inner = adsk.core.Point3D.create(x0 + mw, 0, 0)
-    p_br_outer = adsk.core.Point3D.create(x0 + mw + jt, 0, 0)
-    p_tl_inner = adsk.core.Point3D.create(x0, jd, 0)
-    p_tr_inner = adsk.core.Point3D.create(x0 + mw, jd, 0)
-    p_tl_outer = adsk.core.Point3D.create(x0 - jt, jd + hh, 0)
-    p_tr_outer = adsk.core.Point3D.create(x0 + mw + jt, jd + hh, 0)
+    # Define profile points (clockwise from bottom-left outer)
+    points = [
+        adsk.core.Point3D.create(x0 - jt, 0, 0),           # bottom-left outer
+        adsk.core.Point3D.create(x0 - jt, jd + hh, 0),     # top-left outer
+        adsk.core.Point3D.create(x0 + mw + jt, jd + hh, 0),# top-right outer
+        adsk.core.Point3D.create(x0 + mw + jt, 0, 0),      # bottom-right outer
+        adsk.core.Point3D.create(x0 + mw, 0, 0),           # bottom-right inner
+        adsk.core.Point3D.create(x0 + mw, jd, 0),          # top-right inner
+        adsk.core.Point3D.create(x0, jd, 0),               # top-left inner
+        adsk.core.Point3D.create(x0, 0, 0),                # bottom-left inner
+    ]
 
-    # Draw single closed profile
-    lines.addByTwoPoints(p_bl_outer, p_tl_outer)
-    lines.addByTwoPoints(p_tl_outer, p_tr_outer)
-    lines.addByTwoPoints(p_tr_outer, p_br_outer)
-    lines.addByTwoPoints(p_br_outer, p_br_inner)
-    lines.addByTwoPoints(p_br_inner, p_tr_inner)
-    lines.addByTwoPoints(p_tr_inner, p_tl_inner)
-    lines.addByTwoPoints(p_tl_inner, p_bl_inner)
-    lines.addByTwoPoints(p_bl_inner, p_bl_outer)
+    # Draw closed profile
+    for i in range(len(points)):
+        lines.addByTwoPoints(points[i], points[(i + 1) % len(points)])
 
     # Return handle center in mm
-    handleCenterX = originX + mouthWidth / 2.0
-    handleCenterY = jawDepth + handleHeight / 2.0
-    return handleCenterX, handleCenterY
+    handle_center_x = origin_x + mouth_width / 2.0
+    handle_center_y = jaw_depth + handle_height / 2.0
+    return handle_center_x, handle_center_y
+
+
+def extrude_profile(extrudes, profile, depth_mm, operation):
+    """Extrude a profile and return the resulting body."""
+    ext_input = extrudes.createInput(profile, operation)
+    ext_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(mm(depth_mm)))
+    result = extrudes.add(ext_input)
+    return result.bodies.item(0) if result.bodies.count > 0 else None
+
+
+def create_text_profiles(sketch, text, position_x, position_y, height_mm):
+    """
+    Create text on a sketch, explode it, and return the profiles.
+    Text is rotated 90 degrees and centered horizontally.
+    """
+    texts = sketch.sketchTexts
+    position = adsk.core.Point3D.create(mm(position_x), mm(position_y), 0)
+
+    text_input = texts.createInput(text, mm(height_mm), position)
+    text_input.horizontalAlignment = adsk.core.HorizontalAlignments.CenterHorizontalAlignment
+    text_input.angle = math.pi / 2
+
+    sketch_text = texts.add(text_input)
+    sketch_text.explode()
+
+    return sketch.profiles
+
+
+def engrave_profiles(extrudes, profiles, depth_mm):
+    """Cut profiles into existing bodies. Returns (success_count, fail_count)."""
+    success = 0
+    fail = 0
+
+    for i in range(profiles.count):
+        try:
+            profile = profiles.item(i)
+            ext_input = extrudes.createInput(profile, adsk.fusion.FeatureOperations.CutFeatureOperation)
+            distance = adsk.fusion.DistanceExtentDefinition.create(
+                adsk.core.ValueInput.createByReal(mm(depth_mm))
+            )
+            ext_input.setOneSideExtent(distance, adsk.fusion.ExtentDirections.NegativeExtentDirection)
+            extrudes.add(ext_input)
+            success += 1
+        except:
+            fail += 1
+
+    return success, fail
+
+
+def create_offset_plane(root_comp, z_offset_mm):
+    """Create a construction plane offset from XY plane."""
+    planes = root_comp.constructionPlanes
+    plane_input = planes.createInput()
+    offset = adsk.core.ValueInput.createByReal(mm(z_offset_mm))
+    plane_input.setByOffset(root_comp.xYConstructionPlane, offset)
+    return planes.add(plane_input)
+
+
+def create_labeled_wrench(root_comp, extrudes, label, origin_x, config):
+    """
+    Create a single wrench body with engraved label.
+    Returns debug info string.
+    """
+    # Create wrench body sketch on XY plane
+    body_sketch = root_comp.sketches.add(root_comp.xYConstructionPlane)
+
+    handle_x, handle_y = create_wrench_profile(
+        body_sketch,
+        origin_x,
+        config['mouth_width'],
+        config['jaw_depth'],
+        config['jaw_thickness'],
+        config['handle_height']
+    )
+
+    # Extrude wrench body
+    if body_sketch.profiles.count == 0:
+        return f"{label}: No profile created"
+
+    body = extrude_profile(
+        extrudes,
+        body_sketch.profiles.item(0),
+        config['extrude_depth'],
+        adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+    )
+
+    if body is None:
+        return f"{label}: Extrude failed"
+
+    body.name = label
+
+    # Create text sketch on a plane at the top of the body
+    text_plane = create_offset_plane(root_comp, config['extrude_depth'])
+    text_sketch = root_comp.sketches.add(text_plane)
+
+    # Create and engrave text
+    profiles = create_text_profiles(
+        text_sketch,
+        label,
+        handle_x,
+        handle_y,
+        config['text_height']
+    )
+
+    success, fail = engrave_profiles(extrudes, profiles, config['emboss_depth'])
+
+    return f"{label}: {profiles.count} profiles, {success} engraved, {fail} failed"
+
 
 def run(context):
     ui = None
@@ -49,132 +155,32 @@ def run(context):
         app = adsk.core.Application.get()
         ui = app.userInterface
         design = adsk.fusion.Design.cast(app.activeProduct)
-        rootComp = design.rootComponent
+        root_comp = design.rootComponent
+        extrudes = root_comp.features.extrudeFeatures
 
-        # Parameters
-        testSize = 3.0      # Single size for testing
-        spacing = 20.0      # Spacing between shapes in mm
-        jawDepth = 5.0      # Depth of the mouth
-        jawThickness = 2.0  # Thickness of jaw walls
-        handleHeight = 12.0 # Height of handle area (for text)
-        extrudeDepth = 2.0  # Extrusion depth in mm
-        textHeight = 2.5    # Text height in mm
-        embossDepth = 0.5   # How deep to engrave text in mm
+        # Configuration
+        config = {
+            'mouth_width': 3.0,
+            'jaw_depth': 5.0,
+            'jaw_thickness': 2.0,
+            'handle_height': 12.0,
+            'extrude_depth': 2.0,
+            'text_height': 2.5,
+            'emboss_depth': 0.5,
+            'spacing': 20.0,
+        }
 
-        # Test permutations: just labels for now - simplify to debug
         labels = ["T1", "T2", "T3", "T4"]
+        debug_info = []
 
-        extrudes = rootComp.features.extrudeFeatures
-        bodies = []
-        handleCenters = []
-
-        # Step 1: Create each wrench body individually
-        originX = 0.0
+        # Create each wrench completely before moving to the next
         for i, label in enumerate(labels):
-            # Create a fresh sketch for each wrench
-            sketch = rootComp.sketches.add(rootComp.xYConstructionPlane)
+            origin_x = i * config['spacing']
+            result = create_labeled_wrench(root_comp, extrudes, label, origin_x, config)
+            debug_info.append(result)
 
-            # Draw wrench profile
-            hcX, hcY = addWrenchU(
-                sketch, originX, testSize,
-                jawDepth=jawDepth,
-                jawThickness=jawThickness,
-                handleHeight=handleHeight
-            )
-            handleCenters.append((hcX, hcY))
+        ui.messageBox('\n'.join(debug_info), "Results")
 
-            # Extrude the profile
-            if sketch.profiles.count > 0:
-                profile = sketch.profiles.item(0)
-                extInput = extrudes.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-                extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(mm(extrudeDepth)))
-                ext = extrudes.add(extInput)
-
-                if ext.bodies.count > 0:
-                    body = ext.bodies.item(0)
-                    body.name = label
-                    bodies.append(body)
-                    print(f"[DEBUG] Created body: {body.name}")
-
-            originX += spacing
-
-        # Step 2: For each body, find top face and add text
-        debugInfo = []
-        debugInfo.append(f"Created {len(bodies)} bodies")
-
-        for i, body in enumerate(bodies):
-            label = labels[i]
-            hcX, hcY = handleCenters[i]
-
-            # Find the largest top face (face with normal pointing in +Z direction)
-            topFace = None
-            topFaceArea = 0
-            for face in body.faces:
-                evaluator = face.evaluator
-                (success, point) = evaluator.getPointAtParameter(adsk.core.Point2D.create(0.5, 0.5))
-                if success:
-                    (success, normal) = evaluator.getNormalAtPoint(point)
-                    if success and normal.z > 0.9:
-                        # Select the largest top-facing face
-                        if face.area > topFaceArea:
-                            topFace = face
-                            topFaceArea = face.area
-
-            if topFace is None:
-                debugInfo.append(f"{label}: No top face found!")
-                continue
-
-            # Create sketch on the top face
-            textSketch = rootComp.sketches.add(topFace)
-
-            # Get the bounding box of the top face to find its center
-            boundingBox = topFace.boundingBox
-            centerX = (boundingBox.minPoint.x + boundingBox.maxPoint.x) / 2
-            centerY = (boundingBox.minPoint.y + boundingBox.maxPoint.y) / 2
-            centerZ = boundingBox.maxPoint.z
-
-            # Transform face center to sketch coordinates
-            transform = textSketch.transform
-            invTransform = transform.copy()
-            invTransform.invert()
-
-            worldPoint = adsk.core.Point3D.create(centerX, centerY, centerZ)
-            sketchPoint = worldPoint.copy()
-            sketchPoint.transformBy(invTransform)
-
-            # Add text
-            texts = textSketch.sketchTexts
-            position = adsk.core.Point3D.create(sketchPoint.x, sketchPoint.y, 0)
-            textInput = texts.createInput(label, mm(textHeight), position)
-            textInput.horizontalAlignment = adsk.core.HorizontalAlignments.CenterHorizontalAlignment
-            textInput.angle = math.pi / 2
-            sketchText = texts.add(textInput)
-
-            # Explode text to curves so it creates proper profiles for extrusion
-            sketchText.explode()
-
-            profileCount = textSketch.profiles.count
-            debugInfo.append(f"{label}: {profileCount} profiles")
-
-            # Engrave text using extrude cut operation
-            if profileCount > 0:
-                for j in range(profileCount):
-                    profile = textSketch.profiles.item(j)
-                    try:
-                        extInput = extrudes.createInput(profile, adsk.fusion.FeatureOperations.CutFeatureOperation)
-                        # Use negative direction to cut into the body (not away from it)
-                        distance = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(mm(embossDepth)))
-                        extInput.setOneSideExtent(distance, adsk.fusion.ExtentDirections.NegativeExtentDirection)
-                        extrudes.add(extInput)
-                        debugInfo.append(f"  - Engraved profile {j}")
-                    except Exception as e:
-                        debugInfo.append(f"  - Engrave {j} FAILED: {e}")
-
-        ui.messageBox('\n'.join(debugInfo), "Debug Info")
-
-        print("[INFO] Done.")
     except Exception:
         if ui:
             ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
-        else:
-            print('Failed:\n{}'.format(traceback.format_exc()))

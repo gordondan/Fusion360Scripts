@@ -106,16 +106,19 @@ def run(context):
             label = labels[i]
             hcX, hcY = handleCenters[i]
 
-            # Find the top face (face with normal pointing in +Z direction)
+            # Find the largest top face (face with normal pointing in +Z direction)
             topFace = None
+            topFaceArea = 0
             for face in body.faces:
                 evaluator = face.evaluator
                 (success, point) = evaluator.getPointAtParameter(adsk.core.Point2D.create(0.5, 0.5))
                 if success:
                     (success, normal) = evaluator.getNormalAtPoint(point)
                     if success and normal.z > 0.9:
-                        topFace = face
-                        break
+                        # Select the largest top-facing face
+                        if face.area > topFaceArea:
+                            topFace = face
+                            topFaceArea = face.area
 
             if topFace is None:
                 debugInfo.append(f"{label}: No top face found!")
@@ -124,12 +127,18 @@ def run(context):
             # Create sketch on the top face
             textSketch = rootComp.sketches.add(topFace)
 
-            # Transform handle center from world to sketch coordinates
+            # Get the bounding box of the top face to find its center
+            boundingBox = topFace.boundingBox
+            centerX = (boundingBox.minPoint.x + boundingBox.maxPoint.x) / 2
+            centerY = (boundingBox.minPoint.y + boundingBox.maxPoint.y) / 2
+            centerZ = boundingBox.maxPoint.z
+
+            # Transform face center to sketch coordinates
             transform = textSketch.transform
             invTransform = transform.copy()
             invTransform.invert()
 
-            worldPoint = adsk.core.Point3D.create(mm(hcX), mm(hcY), mm(extrudeDepth))
+            worldPoint = adsk.core.Point3D.create(centerX, centerY, centerZ)
             sketchPoint = worldPoint.copy()
             sketchPoint.transformBy(invTransform)
 

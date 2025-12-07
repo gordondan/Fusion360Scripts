@@ -1,23 +1,7 @@
-import adsk.core, adsk.fusion, adsk.cam, traceback, os, importlib, sys
+import adsk.core, adsk.fusion, adsk.cam, traceback, os
 
-# Global list to keep all event handlers in scope.
+# Global list to keep event handlers in scope.
 handlers = []
-
-# Constants for lumber dimensions
-NOMINAL_DIMENSIONS = {
-    "2x4": (3.5, 1.5),
-    "2x6": (5.5, 1.5),
-    "2x8": (7.25, 1.5),
-    "2x10": (9.25, 1.5),
-    "2x12": (11.25, 1.5),
-}
-ACTUAL_DIMENSIONS = {
-    "2x4": (4.0, 2.0),
-    "2x6": (6.0, 2.0),
-    "2x8": (8.0, 2.0),
-    "2x10": (10.0, 2.0),
-    "2x12": (12.0, 2.0),
-}
 
 class LumberSelector:
     def __init__(self):
@@ -28,193 +12,194 @@ class LumberSelector:
     
     def create_command_definition(self):
         print("Creating command definition...")
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(script_dir, 'resources')
-    
-        print(f"Checking icon path: {icon_path}")
-        if not os.path.exists(icon_path):
-            raise Exception(f"Resource folder not found at: {icon_path}")
+        # Use your script directory to locate the resources folder.
+        # (For now, we're passing an empty string as the icon so we don't run into icon issues.)
+        scriptDir = os.path.dirname(os.path.realpath(__file__))
+        iconPath = os.path.join(scriptDir, 'resources')
+        print(f"Checking icon path: {iconPath}")
+        if not os.path.exists(iconPath):
+            print(f"Resource folder not found at: {iconPath}")
+            # For testing, we ignore the icons by passing an empty string.
+            iconPath = ""
     
         try:
-            cmd_defs = self.ui.commandDefinitions
-            cmd_def = cmd_defs.itemById("lumberDimensionSelector")
-            if cmd_def:
-                print("Deleting existing command definition...")
-                cmd_def.deleteMe()
+            cmdDefs = self.ui.commandDefinitions
+            # Delete any existing definition.
+            cmdDef = cmdDefs.itemById('lumberDimensionSelector')
+            if cmdDef:
+                cmdDef.deleteMe()
     
-            # Temporarily use an empty icon path to test if the resource folder is the issue.
-            cmd_def = cmd_defs.addButtonDefinition(
-                "lumberDimensionSelector",
-                "Lumber Dimension Selector",
-                "Select dimensions for lumber placement",
-                ""  # Pass an empty string for now
+            cmdDef = cmdDefs.addButtonDefinition(
+                'lumberDimensionSelector',
+                'Lumber Dialog',
+                'Open the lumber dialog',
+                iconPath  # Using empty icon path if resources not set up.
             )
             print("Command definition created successfully.")
-            return cmd_def
-        except Exception as e:
-            print(f"Error in create_command_definition: {e}")
-            self.ui.messageBox(f"Failed:\n{traceback.format_exc()}")
+            return cmdDef
+        except Exception:
+            self.ui.messageBox('Error in create_command_definition:\n{}'.format(traceback.format_exc()))
     
     def add_command_inputs(self, command):
         print("Adding command inputs...")
         inputs = command.commandInputs
+        
+        # Radio button for Dimension Type
+        dimInput = inputs.addRadioButtonGroupCommandInput('dimensionType', 'Dimension Type', '')
+        dimInput.listItems.add('Nominal', True)
+        dimInput.listItems.add('Actual', False)
+        
+        # Radio button for Lumber Size
+        sizeInput = inputs.addRadioButtonGroupCommandInput('lumberSize', 'Lumber Size', '')
+        for s in ['2x4', '2x6', '2x8', '2x10', '2x12']:
+            sizeInput.listItems.add(s, s == '2x4')
+        import adsk.core, adsk.fusion, adsk.cam, traceback, os
+
+handlers = []  # Global list for event handlers
+
+class LumberSelector:
+    def __init__(self):
+        print("Initializing LumberSelector...")
+        self.app = adsk.core.Application.get()
+        self.ui = self.app.userInterface
+        self.handlers = []
     
-        dimension_type_input = inputs.addRadioButtonGroupCommandInput(
-            "dimensionType", "Dimension Type"
-        )
-        dimension_type_input.listItems.add("Nominal", False)
-        dimension_type_input.listItems.add("Actual", True)
+    def create_command_definition(self):
+        print("Creating command definition...")
+        scriptDir = os.path.dirname(os.path.realpath(__file__))
+        iconPath = os.path.join(scriptDir, 'resources')
+        print(f"Checking icon path: {iconPath}")
+        if not os.path.exists(iconPath):
+            raise Exception(f"Resource folder not found at: {iconPath}")
     
-        lumber_size_input = inputs.addRadioButtonGroupCommandInput(
-            "lumberSize", "Lumber Size"
-        )
-        sizes = ["2x4", "2x6", "2x8", "2x10", "2x12"]
-        for size in sizes:
-            is_default = size == "2x4"
-            lumber_size_input.listItems.add(size, is_default)
+        try:
+            cmdDefs = self.ui.commandDefinitions
+            cmdDef = cmdDefs.itemById('lumberDimensionSelector')
+            if cmdDef:
+                print("Deleting existing command definition...")
+                cmdDef.deleteMe()
     
-        length_input = inputs.addValueInput(
-            "length", "Length (feet)", "ft", adsk.core.ValueInput.createByReal(96)
-        )
+            # IMPORTANT: The resource folder MUST contain valid icon files,
+            # e.g. 'SmallIcon.png' (and optionally 'LargeIcon.png')
+            cmdDef = cmdDefs.addButtonDefinition(
+                'lumberDimensionSelector',
+                'Lumber Dialog',
+                'Open the lumber dialog',
+                iconPath  # Use the folder with valid icon images
+            )
+            print("Command definition created successfully.")
+            return cmdDef
+        except Exception:
+            self.ui.messageBox('Error in create_command_definition:\n{}'.format(traceback.format_exc()))
     
-        inputs.addSelectionInput("axisSelection", "Select Axis", "Select an axis")
-        inputs.addSelectionInput("pointSelection", "Starting Point", "Select a starting point")
-    
-        axis_input = inputs.itemById("axisSelection")
-        axis_input.addSelectionFilter("LinearEdges")
-    
-        point_input = inputs.itemById("pointSelection")
-        point_input.setSelectionLimits(1)
-        point_input.addSelectionFilter("SketchPoints")
-        point_input.addSelectionFilter("Vertices")
+    def add_command_inputs(self, command):
+        print("Adding command inputs...")
+        inputs = command.commandInputs
+        
+        # Add a radio button group for dimension type.
+        dimInput = inputs.addRadioButtonGroupCommandInput('dimensionType', 'Dimension Type', '')
+        dimInput.listItems.add('Nominal', True)
+        dimInput.listItems.add('Actual', False)
+        
+        # Add a radio button group for lumber size.
+        sizeInput = inputs.addRadioButtonGroupCommandInput('lumberSize', 'Lumber Size', '')
+        for s in ['2x4', '2x6', '2x8', '2x10', '2x12']:
+            sizeInput.listItems.add(s, s == '2x4')
+        
+        # Add a value input for length.
+        inputs.addValueInput('length', 'Length (feet)', 'ft', adsk.core.ValueInput.createByReal(96))
+        
+        # Add a selection input for an axis.
+        axisInput = inputs.addSelectionInput('axisSelection', 'Select Axis', 'Select an axis')
+        axisInput.addSelectionFilter('LinearEdges')
+        
+        # Add a selection input for a starting point.
+        pointInput = inputs.addSelectionInput('pointSelection', 'Starting Point', 'Select a starting point')
+        pointInput.setSelectionLimits(1)
+        pointInput.addSelectionFilter('SketchPoints')
+        pointInput.addSelectionFilter('Vertices')
         print("Command inputs added successfully.")
+    
+    def command_created(self, args):
+        try:
+            eventArgs = adsk.core.CommandCreatedEventArgs.cast(args)
+            command = eventArgs.command
+            self.add_command_inputs(command)
+    
+            onExecute = CommandExecuteHandler(self)
+            command.execute.add(onExecute)
+            self.handlers.append(onExecute)
+            print("Command creation complete.")
+        except Exception:
+            self.ui.messageBox('Error in command_created:\n{}'.format(traceback.format_exc()))
     
     def start(self):
         print("Starting LumberSelector...")
         try:
-            cmd_def = self.create_command_definition()
-            on_command_created = CommandCreatedEventHandler(self)
-            cmd_def.commandCreated.add(on_command_created)
-            self.handlers.append(on_command_created)
+            cmdDef = self.create_command_definition()
+            onCommandCreated = CommandCreatedEventHandler(self)
+            cmdDef.commandCreated.add(onCommandCreated)
+            self.handlers.append(onCommandCreated)
     
-            panel = self.ui.allToolbarPanels.itemById("SolidCreatePanel")
-            button = panel.controls.addCommand(cmd_def)
+            panel = self.ui.allToolbarPanels.itemById('SolidCreatePanel')
+            panel.controls.addCommand(cmdDef)
             print("LumberSelector started successfully.")
         except Exception:
-            print("Error in start()")
-            self.ui.messageBox(f"Failed:\n{traceback.format_exc()}")
+            self.ui.messageBox('Error in start():\n{}'.format(traceback.format_exc()))
     
     def stop(self):
         print("Stopping LumberSelector...")
         try:
-            panel = self.ui.allToolbarPanels.itemById("SolidCreatePanel")
-            button = panel.controls.itemById("lumberDimensionSelector")
+            panel = self.ui.allToolbarPanels.itemById('SolidCreatePanel')
+            button = panel.controls.itemById('lumberDimensionSelector')
             if button:
                 button.deleteMe()
     
-            cmd_def = self.ui.commandDefinitions.itemById("lumberDimensionSelector")
-            if cmd_def:
-                cmd_def.deleteMe()
+            cmdDef = self.ui.commandDefinitions.itemById('lumberDimensionSelector')
+            if cmdDef:
+                cmdDef.deleteMe()
             print("LumberSelector stopped.")
         except Exception:
-            print("Error in stop()")
-            self.ui.messageBox(f"Failed:\n{traceback.format_exc()}")
-    
-    # Example helper methods that might be needed (you mentioned them in your earlier code)
-    def get_selected_axis(self, selection):
-        entity = selection.entity
-        if entity.objectType == adsk.fusion.BRepEdge.classType():
-            return entity
-        return None
-    
-    def get_selected_point(self, selection):
-        entity = selection.entity
-        if entity.objectType == adsk.fusion.SketchPoint.classType():
-            return entity.worldGeometry
-        elif entity.objectType == adsk.fusion.BRepVertex.classType():
-            return entity.geometry
-        return None
-    
-    def get_lumber_dimensions(self, dimension_type, lumber_size):
-        if dimension_type == "Actual":
-            return ACTUAL_DIMENSIONS[lumber_size]
-        else:
-            return NOMINAL_DIMENSIONS[lumber_size]
+            self.ui.messageBox('Error in stop():\n{}'.format(traceback.format_exc()))
 
-# The remaining classes should remain defined at the module level.
 class CommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
-    def __init__(self, lumber_selector):
+    def __init__(self, lumberSelector):
         super().__init__()
-        self.lumber_selector = lumber_selector
+        self.lumberSelector = lumberSelector
     
     def notify(self, args):
         print("Command created event triggered.")
-        try:
-            event_args = adsk.core.CommandCreatedEventArgs.cast(args)
-            command = event_args.command
-    
-            self.lumber_selector.add_command_inputs(command)
-    
-            on_execute = CommandExecuteHandler(self.lumber_selector)
-            command.execute.add(on_execute)
-            self.lumber_selector.handlers.append(on_execute)
-            print("Command creation complete.")
-        except Exception:
-            print("Error in CommandCreatedEventHandler")
-            self.lumber_selector.ui.messageBox(f"Failed:\n{traceback.format_exc()}")
+        self.lumberSelector.command_created(args)
 
 class CommandExecuteHandler(adsk.core.CommandEventHandler):
-    def __init__(self, lumber_selector):
+    def __init__(self, lumberSelector):
         super().__init__()
-        self.lumber_selector = lumber_selector
+        self.lumberSelector = lumberSelector
     
     def notify(self, args):
         print("Command execution started.")
         try:
-            event_args = adsk.core.CommandEventArgs.cast(args)
-            command = event_args.command
-            inputs = command.commandInputs
-    
-            axis_selection = inputs.itemById("axisSelection").selection(0)
-            point_selection = inputs.itemById("pointSelection").selection(0)
-            dimension_type = inputs.itemById("dimensionType").selectedItem.name
-            lumber_size = inputs.itemById("lumberSize").selectedItem.name
-            length_feet = inputs.itemById("length").value
-    
-            print(f"User selected: Axis={axis_selection}, Point={point_selection}, "
-                  f"Type={dimension_type}, Size={lumber_size}, Length={length_feet}ft")
-    
-            axis = self.lumber_selector.get_selected_axis(axis_selection)
-            point = self.lumber_selector.get_selected_point(point_selection)
-    
-            if not axis:
-                print("Invalid axis selected.")
-                self.lumber_selector.ui.messageBox("Please select a valid axis.")
-                return
-    
-            if not point:
-                print("Invalid point selected.")
-                self.lumber_selector.ui.messageBox("Please select a valid starting point.")
-                return
-    
-            width_in, height_in = self.lumber_selector.get_lumber_dimensions(dimension_type, lumber_size)
-            length_in = length_feet * 12
-            print(f"Calculated dimensions: Width={width_in}, Height={height_in}, Length={length_in}")
-    
+            eventArgs = adsk.core.CommandEventArgs.cast(args)
+            inputs = eventArgs.command.commandInputs
+            dimensionType = inputs.itemById('dimensionType').selectedItem.name
+            lumberSize = inputs.itemById('lumberSize').selectedItem.name
+            lengthValue = inputs.itemById('length').value
+            
+            msg = f"Selected: {dimensionType} {lumberSize} at {lengthValue} ft"
+            print(msg)
+            self.lumberSelector.ui.messageBox(msg)
         except Exception:
-            print("Error during command execution.")
-            self.lumber_selector.ui.messageBox(f"Failed:\n{traceback.format_exc()}")
+            self.lumberSelector.ui.messageBox('Error in command execution:\n{}'.format(traceback.format_exc()))
 
 def run(context):
     print("Running LumberSelector add-in...")
     try:
         global lumber_selector
-        lumber_selector = LumberSelector()  # Instance name can be lower-case
+        lumber_selector = LumberSelector()
         lumber_selector.start()
         print("LumberSelector is now running.")
     except Exception:
-        print("Error in run()")
-        adsk.core.Application.get().userInterface.messageBox(f"Failed:\n{traceback.format_exc()}")
+        adsk.core.Application.get().userInterface.messageBox('Error in run():\n{}'.format(traceback.format_exc()))
 
 def stop(context):
     print("Stopping LumberSelector add-in...")
@@ -223,5 +208,111 @@ def stop(context):
         lumber_selector.stop()
         print("LumberSelector stopped.")
     except Exception:
-        print("Error in stop()")
-        adsk.core.Application.get().userInterface.messageBox(f"Failed:\n{traceback.format_exc()}")
+        adsk.core.Application.get().userInterface.messageBox('Error in stop():\n{}'.format(traceback.format_exc()))
+
+        # Value input for Length
+        inputs.addValueInput('length', 'Length (feet)', 'ft', adsk.core.ValueInput.createByReal(96))
+        
+        # Selection input for Axis (for example purposes)
+        axisInput = inputs.addSelectionInput('axisSelection', 'Select Axis', 'Select an axis')
+        axisInput.addSelectionFilter('LinearEdges')
+        
+        # Selection input for Starting Point
+        pointInput = inputs.addSelectionInput('pointSelection', 'Starting Point', 'Select a starting point')
+        pointInput.setSelectionLimits(1)
+        pointInput.addSelectionFilter('SketchPoints')
+        pointInput.addSelectionFilter('Vertices')
+        print("Command inputs added successfully.")
+    
+    def command_created(self, args):
+        try:
+            eventArgs = adsk.core.CommandCreatedEventArgs.cast(args)
+            command = eventArgs.command
+            self.add_command_inputs(command)
+    
+            onExecute = CommandExecuteHandler(self)
+            command.execute.add(onExecute)
+            self.handlers.append(onExecute)
+            print("Command creation complete.")
+        except Exception:
+            self.ui.messageBox('Error in command_created:\n{}'.format(traceback.format_exc()))
+    
+    def start(self):
+        print("Starting LumberSelector...")
+        try:
+            cmdDef = self.create_command_definition()
+            onCommandCreated = CommandCreatedEventHandler(self)
+            cmdDef.commandCreated.add(onCommandCreated)
+            self.handlers.append(onCommandCreated)
+    
+            panel = self.ui.allToolbarPanels.itemById('SolidCreatePanel')
+            panel.controls.addCommand(cmdDef)
+            print("LumberSelector started successfully.")
+        except Exception:
+            self.ui.messageBox('Error in start():\n{}'.format(traceback.format_exc()))
+    
+    def stop(self):
+        print("Stopping LumberSelector...")
+        try:
+            panel = self.ui.allToolbarPanels.itemById('SolidCreatePanel')
+            button = panel.controls.itemById('lumberDimensionSelector')
+            if button:
+                button.deleteMe()
+    
+            cmdDef = self.ui.commandDefinitions.itemById('lumberDimensionSelector')
+            if cmdDef:
+                cmdDef.deleteMe()
+            print("LumberSelector stopped.")
+        except Exception:
+            self.ui.messageBox('Error in stop():\n{}'.format(traceback.format_exc()))
+
+# Event handler for command creation.
+class CommandCreatedEventHandler(adsk.core.CommandCreatedEventHandler):
+    def __init__(self, lumberSelector):
+        super().__init__()
+        self.lumberSelector = lumberSelector
+    
+    def notify(self, args):
+        print("Command created event triggered.")
+        self.lumberSelector.command_created(args)
+
+# Event handler for command execution.
+class CommandExecuteHandler(adsk.core.CommandEventHandler):
+    def __init__(self, lumberSelector):
+        super().__init__()
+        self.lumberSelector = lumberSelector
+    
+    def notify(self, args):
+        print("Command execution started.")
+        try:
+            eventArgs = adsk.core.CommandEventArgs.cast(args)
+            inputs = eventArgs.command.commandInputs
+            # Get the user selections.
+            dimensionType = inputs.itemById('dimensionType').selectedItem.name
+            lumberSize = inputs.itemById('lumberSize').selectedItem.name
+            lengthValue = inputs.itemById('length').value
+            
+            msg = f"Selected: {dimensionType} {lumberSize} at {lengthValue} ft"
+            print(msg)
+            self.lumberSelector.ui.messageBox(msg)
+        except Exception:
+            self.lumberSelector.ui.messageBox('Error in command execution:\n{}'.format(traceback.format_exc()))
+
+def run(context):
+    print("Running LumberSelector add-in...")
+    try:
+        global lumber_selector
+        lumber_selector = LumberSelector()
+        lumber_selector.start()
+        print("LumberSelector is now running.")
+    except Exception:
+        adsk.core.Application.get().userInterface.messageBox('Error in run():\n{}'.format(traceback.format_exc()))
+
+def stop(context):
+    print("Stopping LumberSelector add-in...")
+    try:
+        global lumber_selector
+        lumber_selector.stop()
+        print("LumberSelector stopped.")
+    except Exception:
+        adsk.core.Application.get().userInterface.messageBox('Error in stop():\n{}'.format(traceback.format_exc()))

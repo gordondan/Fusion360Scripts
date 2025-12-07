@@ -160,7 +160,6 @@ def run(context):
 
         # Configuration
         config = {
-            'mouth_width': 3.0,
             'jaw_depth': 5.0,
             'jaw_thickness': 2.0,
             'handle_height': 12.0,
@@ -170,16 +169,23 @@ def run(context):
             'spacing': 20.0,
         }
 
-        labels = ["T1", "T2", "T3", "T4"]
-        debug_info = []
+        # Mouth size range (in mm)
+        mouth_size_min = 2.0
+        mouth_size_max = 4.0
+        mouth_size_increment = 0.5
 
-        # Create each wrench completely before moving to the next
-        for i, label in enumerate(labels):
+        # Generate mouth sizes from range
+        mouth_size = mouth_size_min
+        i = 0
+        while mouth_size <= mouth_size_max + 0.001:  # Small epsilon for float comparison
             origin_x = i * config['spacing']
-            result = create_labeled_wrench(root_comp, extrudes, label, origin_x, config)
-            debug_info.append(result)
+            config['mouth_width'] = mouth_size
+            label = f"{mouth_size:.1f}"
+            create_labeled_wrench(root_comp, extrudes, label, origin_x, config)
+            mouth_size += mouth_size_increment
+            i += 1
 
-        ui.messageBox('\n'.join(debug_info), "Results")
+        # ui.messageBox("Done", "Results")
 
     except Exception:
         if ui:

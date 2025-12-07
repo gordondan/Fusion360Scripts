@@ -1,4 +1,4 @@
-import adsk.core, adsk.fusion, traceback
+import adsk.core, adsk.fusion, traceback, math
 
 # Helper: convert mm to internal units (Fusion 360 API uses centimeters internally)
 def mm(val):
@@ -67,7 +67,7 @@ def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, hand
 
 def addText(sketch, textString, centerX_mm, centerY_mm, textHeightMM=3.0):
     """
-    Add centered text at the given position (in mm).
+    Add centered text at the given position (in mm), rotated 90° counter-clockwise.
     """
     texts = sketch.sketchTexts
     # Convert to cm
@@ -87,10 +87,10 @@ def addText(sketch, textString, centerX_mm, centerY_mm, textHeightMM=3.0):
         corner2,
         adsk.core.HorizontalAlignments.CenterHorizontalAlignment,
         adsk.core.VerticalAlignments.MiddleVerticalAlignment,
-        0
+        math.pi / 2  # 90° counter-clockwise in radians
     )
     texts.add(textInput)
-    print(f"[DEBUG] Text '{textString}' added at center ({centerX_mm}, {centerY_mm})mm")
+    print(f"[DEBUG] Text '{textString}' added at center ({centerX_mm}, {centerY_mm})mm, rotated 90° CCW")
 
 def run(context):
     ui = None
@@ -113,9 +113,14 @@ def run(context):
         handleHeight = 10.0 # Height of handle area (for text)
         extrudeDepth = 2.0 # Extrusion depth in mm
 
+        # Track sizes for naming bodies
+        sizes = []
+
         originX = 0.0
         w = minW
         while w <= maxW + 1e-6:
+            sizes.append(w)
+
             # Draw the wrench shape and get handle center for text
             handleCenterX, handleCenterY = addWrenchU(
                 sketch, originX, w,
@@ -124,25 +129,39 @@ def run(context):
                 handleHeight=handleHeight
             )
 
-            # Add centered text in the handle area
-            try:
-                addText(sketch, f"{w:.1f}", handleCenterX, handleCenterY, textHeightMM=3.0)
-            except Exception as e:
-                print(f"[ERROR] Text add failed for width {w:.2f} mm: {e}")
-
             originX += spacing + w + 2 * jawThickness  # Space based on shape width
             w += step
 
-        # Extrude all profiles
-        print("[INFO] Extruding profiles...")
+        # Count wrench profiles BEFORE adding text
+        numWrenchProfiles = sketch.profiles.count
+        print(f"[DEBUG] Found {numWrenchProfiles} wrench profiles before adding text")
+
+        # Now add text (creates additional profiles we don't want to extrude)
+        originX = 0.0
+        for size in sizes:
+            handleCenterX = originX + size / 2.0
+            handleCenterY = jawDepth + handleHeight / 2.0
+            try:
+                addText(sketch, f"{size:.1f}", handleCenterX, handleCenterY, textHeightMM=3.0)
+            except Exception as e:
+                print(f"[ERROR] Text add failed for size {size:.2f} mm: {e}")
+            originX += spacing + size + 2 * jawThickness
+
+        # Extrude only wrench profiles (not text)
+        print("[INFO] Extruding wrench profiles...")
         extrudes = rootComp.features.extrudeFeatures
-        for i, profile in enumerate(sketch.profiles):
+        for i in range(numWrenchProfiles):
+            profile = sketch.profiles.item(i)
             try:
                 extInput = extrudes.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
                 distance = adsk.core.ValueInput.createByReal(mm(extrudeDepth))
                 extInput.setDistanceExtent(False, distance)
-                extrudes.add(extInput)
-                print(f"[DEBUG] Extruded profile {i+1}")
+                ext = extrudes.add(extInput)
+                # Name the body S{size}
+                if ext.bodies.count > 0:
+                    body = ext.bodies.item(0)
+                    body.name = f"S{sizes[i]:.1f}"
+                    print(f"[DEBUG] Extruded and named body: {body.name}")
             except Exception as e:
                 print(f"[ERROR] Extrude failed for profile {i+1}: {e}")
 

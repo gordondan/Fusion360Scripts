@@ -1,8 +1,8 @@
 import adsk.core, adsk.fusion, traceback
 
-# Helper: convert mm to internal units (Fusion uses cm for text height, but coordinates are mm)
+# Helper: convert mm to internal units (Fusion 360 API uses centimeters internally)
 def mm(val):
-    return val  # for sketch geometry we assume mm is fine; adapt if using different unit system
+    return val / 10.0  # Convert mm to cm for Fusion 360 API
 
 def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, handleLength=12.0, handleWidth=5.0):
     """
@@ -14,22 +14,27 @@ def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, hand
     """
     lines = sketch.sketchCurves.sketchLines
 
+    # Convert all dimensions from mm to cm (Fusion internal units)
     x0 = mm(originX)
     y0 = 0
+    mw = mm(mouthWidth)
+    jd = mm(jawDepth)
+    jt = mm(jawThickness)
+    hl = mm(handleLength)
 
     # Left inner jaw wall
     p1 = adsk.core.Point3D.create(x0, y0, 0)
-    p2 = adsk.core.Point3D.create(x0, y0 + jawDepth, 0)
+    p2 = adsk.core.Point3D.create(x0, y0 + jd, 0)
 
     # Right inner jaw wall
-    p3 = adsk.core.Point3D.create(x0 + mouthWidth, y0, 0)
-    p4 = adsk.core.Point3D.create(x0 + mouthWidth, y0 + jawDepth, 0)
+    p3 = adsk.core.Point3D.create(x0 + mw, y0, 0)
+    p4 = adsk.core.Point3D.create(x0 + mw, y0 + jd, 0)
 
     # Outer walls (with thickness)
-    p1o = adsk.core.Point3D.create(x0 - jawThickness, y0, 0)
-    p2o = adsk.core.Point3D.create(x0 - jawThickness, y0 + jawDepth, 0)
-    p3o = adsk.core.Point3D.create(x0 + mouthWidth + jawThickness, y0, 0)
-    p4o = adsk.core.Point3D.create(x0 + mouthWidth + jawThickness, y0 + jawDepth, 0)
+    p1o = adsk.core.Point3D.create(x0 - jt, y0, 0)
+    p2o = adsk.core.Point3D.create(x0 - jt, y0 + jd, 0)
+    p3o = adsk.core.Point3D.create(x0 + mw + jt, y0, 0)
+    p4o = adsk.core.Point3D.create(x0 + mw + jt, y0 + jd, 0)
 
     # Draw jaw walls (rectangular U-shape)
     # Left wall
@@ -48,10 +53,10 @@ def addWrenchU(sketch, originX, mouthWidth, jawDepth=3.0, jawThickness=1.0, hand
     lines.addByTwoPoints(p2o, p4o)
 
     # Handle rectangle (attached to back of jaw)
-    hx0 = x0 - jawThickness
-    hx1 = x0 + mouthWidth + jawThickness
-    hy0 = y0 + jawDepth
-    hy1 = hy0 + handleLength
+    hx0 = x0 - jt
+    hx1 = x0 + mw + jt
+    hy0 = y0 + jd
+    hy1 = hy0 + hl
 
     p_handle_bl = adsk.core.Point3D.create(hx0, hy0, 0)
     p_handle_tl = adsk.core.Point3D.create(hx0, hy1, 0)
@@ -96,15 +101,16 @@ def run(context):
 
         sketch = rootComp.sketches.add(rootComp.xYConstructionPlane)
         minW = 2.0
-        maxW = 5.0
-        step = 0.5  # try bigger step first just to debug
-        spacing = 20.0
+        maxW = 3.5  # Reduced to 4 shapes for debugging (2.0, 2.5, 3.0, 3.5)
+        step = 0.5
+        spacing = 20.0  # Spacing in mm between shapes
         originX = 0.0
         w = minW
         while w <= maxW + 1e-6:
             addWrenchU(sketch, originX, w, jawDepth=4.0, jawThickness=1.0, handleLength=15.0, handleWidth=5.0)
-            textX = originX + w/2.0
-            textY = -5.0
+            # Convert text position to cm for Fusion API
+            textX = mm(originX + w/2.0)
+            textY = mm(-5.0)
             try:
                 addText(sketch, f"{w:.1f} mm", textX, textY, textHeightMM=5.0)
             except Exception as e:
